@@ -1,0 +1,11 @@
+{
+  "name": "motion-graphics-skill",
+  "version": "1.0.0",
+  "description": "Make short motion-graphics videos from a text description, in pure code — rendered to MP4 via headless Chromium + ffmpeg.",
+  "type": "module",
+  "license": "MIT",
+  "keywords": ["motion-graphics", "video", "animation", "canvas", "ffmpeg", "puppeteer", "claude-code", "skill"],
+  "dependencies": {
+    "puppeteer-core": "^23"
+  }
+}

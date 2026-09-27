@@ -1,0 +1,9 @@
+node_modules/
+.frames/
+*.mp4
+preview-*.png
+showreel.html
+brand.js
+logo.png
+package-lock.json
+.DS_Store

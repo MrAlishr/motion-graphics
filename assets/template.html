@@ -1,0 +1,189 @@
+<!doctype html>
+<html id="root">
+<head>
+<meta charset="utf-8">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<style> html,body{margin:0;padding:0;background:#0B1220;overflow:hidden} #c{display:block} </style>
+<!-- brand.js sets window.BRAND (palette, fonts, name, direction). Optional —
+     the DEFAULTS below cover a full render if it is missing. -->
+<script src="brand.js"></script>
+</head>
+<body>
+<canvas id="c" width="1080" height="1920"></canvas>
+<script>
+// ============ CONFIG — match --w/--h/--dur passed to render.mjs ============
+const W=1080, H=1920, DUR=15;
+const canvas=document.getElementById('c'), ctx=canvas.getContext('2d');
+canvas.width=W; canvas.height=H;
+
+// ============ BRAND (window.BRAND wins; DEFAULTS are a neutral fallback) ====
+const DEFAULTS={
+  name:'Your Project', tagline:'What it does, in one line',
+  dir:'ltr', displayFont:'Poppins', bodyFont:'Inter',
+  fontsUrl:'https://fonts.googleapis.com/css2?family=Poppins:wght@600;800&family=Inter:wght@400;600&display=swap',
+  ink:'#F5F7FA', bg1:'#131C2E', bg2:'#0B1220', bg3:'#080D16',
+  brand:'#3B82F6', brandLight:'#60A5FA', brandDark:'#1E3A8A', accent:'#F59E0B',
+  features:[['bolt','Fast'],['shield','Secure'],['spark','Simple'],['heart','Loved'],['globe','Everywhere']],
+};
+const B={...DEFAULTS, ...(window.BRAND||{})};
+const INK=B.ink, BRAND=B.brand, BRAND_LIGHT=B.brandLight, BRAND_DARK=B.brandDark, ACCENT=B.accent;
+const DISPLAY=B.displayFont, BODY=B.bodyFont, DIR=B.dir;
+// inject the brand font stylesheet
+if(B.fontsUrl){const l=document.createElement('link');l.rel='stylesheet';l.href=B.fontsUrl;document.head.appendChild(l);}
+
+// ============ EASING (classic animation curves) ============================
+const clamp01=x=>x<0?0:x>1?1:x, lerp=(a,b,t)=>a+(b-a)*t;
+const outExpo=x=>x>=1?1:1-Math.pow(2,-10*x);
+const outCubic=x=>1-Math.pow(1-x,3);
+const inOutCubic=x=>x<.5?4*x*x*x:1-Math.pow(-2*x+2,3)/2;
+const outBack=x=>{const c=1.70158;return 1+(c+1)*Math.pow(x-1,3)+c*Math.pow(x-1,2);};
+const inBack=x=>{const c=1.70158;return (c+1)*x*x*x-c*x*x;};
+const outElastic=x=>{const c=(2*Math.PI)/3;return x<=0?0:x>=1?1:Math.pow(2,-10*x)*Math.sin((x*10-.75)*c)+1;};
+// content fade envelope for a scene of length d (fade in fin, out fout)
+const env=(lt,d,fin=0.5,fout=0.45)=>Math.min(clamp01(lt/fin),clamp01((d-lt)/fout));
+function hex(h,a){const n=parseInt(h.slice(1),16);return `rgba(${n>>16&255},${n>>8&255},${n&255},${a})`;}
+
+// ============ LOGO (optional; drop logo.png beside this file) ==============
+const logo=new Image(); let logoReady=false;
+logo.onload=()=>logoReady=true; logo.onerror=()=>logoReady=false; logo.src='logo.png';
+
+// ============ DRAW HELPERS ================================================
+function drawBg(t){
+  const g=ctx.createLinearGradient(0,0,0,H);
+  g.addColorStop(0,B.bg1); g.addColorStop(0.55,B.bg2); g.addColorStop(1,B.bg3);
+  ctx.fillStyle=g; ctx.fillRect(0,0,W,H);
+  const cy=H*0.42, r=520+40*Math.sin(t*0.9);
+  const rg=ctx.createRadialGradient(W/2,cy,60,W/2,cy,r);
+  rg.addColorStop(0,hex(BRAND,0.32)); rg.addColorStop(1,hex(BRAND,0));
+  ctx.fillStyle=rg; ctx.fillRect(0,0,W,H);
+}
+// signature motif: a soft parallax dot-grid that drifts with time
+function drawGrid(t,alpha=1){
+  ctx.save();
+  const step=96, ox=(t*14)%step, oy=(t*9)%step;
+  for(let y=-step;y<=H+step;y+=step) for(let x=-step;x<=W+step;x+=step){
+    const px=x+ox+Math.sin(y*0.01+t*0.6)*10, py=y+oy+Math.cos(x*0.01+t*0.5)*10;
+    const tw=0.04+0.05*(0.5+0.5*Math.sin(x*0.02+y*0.02+t*0.9));
+    ctx.fillStyle=hex(BRAND_LIGHT,tw*alpha); ctx.beginPath(); ctx.arc(px,py,2.2,0,7); ctx.fill();
+  }
+  ctx.restore();
+}
+// text: direction from BRAND.dir; alpha MULTIPLIES the current globalAlpha
+// (so it respects an outer ctx.globalAlpha set by the caller).
+function text(str,x,y,size,{face=BODY,weight=400,color=INK,align='center',alpha=1}={}){
+  ctx.save();
+  ctx.globalAlpha=ctx.globalAlpha*alpha; ctx.direction=DIR; ctx.textAlign=align; ctx.textBaseline='middle';
+  ctx.fillStyle=color; ctx.font=`${weight} ${size}px "${face}", sans-serif`;
+  ctx.fillText(str,x,y); ctx.restore();
+}
+// text that shrinks to fit maxW
+function fitText(str,x,y,size,maxW,opts){
+  const f=opts.face||BODY, w=opts.weight||400;
+  ctx.font=`${w} ${size}px "${f}", sans-serif`;
+  let s=size; while(ctx.measureText(str).width>maxW&&s>26){s-=2;ctx.font=`${w} ${s}px "${f}", sans-serif`;}
+  text(str,x,y,s,opts);
+}
+function rrect(x,y,w,h,r){
+  ctx.beginPath(); ctx.moveTo(x+r,y);
+  ctx.arcTo(x+w,y,x+w,y+h,r); ctx.arcTo(x+w,y+h,x,y+h,r);
+  ctx.arcTo(x,y+h,x,y,r); ctx.arcTo(x,y,x+w,y,r); ctx.closePath();
+}
+// ambient particles with cheap motion blur (trail from t-0.02)
+const PARTS=Array.from({length:46},(_,i)=>({x:(Math.sin(i*12.9)*.5+.5),sp:0.4+((i*7)%10)/22,ph:i*1.7,r:1.6+((i*5)%7)/2.2,acc:i%4===0}));
+function drawParticles(t,alpha){
+  ctx.save(); ctx.lineCap='round';
+  for(const p of PARTS){
+    const y=(H+120)-(((t*p.sp*90+p.ph*70)%(H+240)));
+    const x=p.x*W+Math.sin(t*0.8+p.ph)*40;
+    const px=x+Math.sin((t-0.02)*0.8+p.ph)*40-Math.sin(t*0.8+p.ph)*40;
+    ctx.strokeStyle=hex(p.acc?ACCENT:BRAND_LIGHT,0.5*alpha); ctx.lineWidth=p.r*2;
+    ctx.beginPath(); ctx.moveTo(px,y+p.sp*1.8); ctx.lineTo(x,y); ctx.stroke();
+  }
+  ctx.restore();
+}
+// post fx: vignette + film grain
+function postfx(){
+  const vg=ctx.createRadialGradient(W/2,H*0.45,H*0.25,W/2,H*0.5,H*0.72);
+  vg.addColorStop(0,'rgba(0,0,0,0)'); vg.addColorStop(1,'rgba(0,0,0,0.55)');
+  ctx.fillStyle=vg; ctx.fillRect(0,0,W,H);
+  ctx.save(); ctx.globalAlpha=0.035;
+  for(let i=0;i<1400;i++){ctx.fillStyle=Math.random()<0.5?'#000':'#fff';ctx.fillRect(Math.random()*W,Math.random()*H,2,2);}
+  ctx.restore();
+}
+// minimal path icons centered at (x,y), fitting size s
+function icon(name,x,y,s,color){
+  ctx.save(); ctx.translate(x,y); const u=s/2;
+  ctx.strokeStyle=color; ctx.fillStyle=color; ctx.lineWidth=Math.max(2.5,s*0.07); ctx.lineJoin='round'; ctx.lineCap='round';
+  switch(name){
+    case 'bolt':ctx.beginPath();ctx.moveTo(u*0.15,-u);ctx.lineTo(-u*0.5,u*0.1);ctx.lineTo(0,u*0.1);ctx.lineTo(-u*0.15,u);ctx.lineTo(u*0.5,-u*0.1);ctx.lineTo(0,-u*0.1);ctx.closePath();ctx.stroke();break;
+    case 'shield':ctx.beginPath();ctx.moveTo(0,-u);ctx.lineTo(u*0.8,-u*0.6);ctx.lineTo(u*0.8,u*0.1);ctx.bezierCurveTo(u*0.8,u*0.7,u*0.4,u,0,u);ctx.bezierCurveTo(-u*0.4,u,-u*0.8,u*0.7,-u*0.8,u*0.1);ctx.lineTo(-u*0.8,-u*0.6);ctx.closePath();ctx.stroke();break;
+    case 'spark':ctx.beginPath();ctx.moveTo(0,-u);ctx.bezierCurveTo(u*0.15,-u*0.15,u*0.15,-u*0.15,u,0);ctx.bezierCurveTo(u*0.15,u*0.15,u*0.15,u*0.15,0,u);ctx.bezierCurveTo(-u*0.15,u*0.15,-u*0.15,u*0.15,-u,0);ctx.bezierCurveTo(-u*0.15,-u*0.15,-u*0.15,-u*0.15,0,-u);ctx.closePath();ctx.stroke();break;
+    case 'heart':ctx.beginPath();ctx.moveTo(0,u*0.75);ctx.bezierCurveTo(-u*1.2,-u*0.1,-u*0.5,-u*0.9,0,-u*0.3);ctx.bezierCurveTo(u*0.5,-u*0.9,u*1.2,-u*0.1,0,u*0.75);ctx.closePath();ctx.stroke();break;
+    case 'globe':ctx.beginPath();ctx.arc(0,0,u*0.85,0,7);ctx.moveTo(u*0.85,0);ctx.ellipse(0,0,u*0.35,u*0.85,0,0,7);ctx.moveTo(-u*0.85,0);ctx.lineTo(u*0.85,0);ctx.stroke();break;
+    case 'check':ctx.beginPath();ctx.arc(0,0,u*0.85,0,7);ctx.stroke();ctx.beginPath();ctx.moveTo(-u*0.4,0);ctx.lineTo(-u*0.1,u*0.35);ctx.lineTo(u*0.45,-u*0.35);ctx.stroke();break;
+    case 'rocket':ctx.beginPath();ctx.moveTo(0,-u);ctx.bezierCurveTo(u*0.6,-u*0.3,u*0.5,u*0.4,u*0.25,u*0.65);ctx.lineTo(-u*0.25,u*0.65);ctx.bezierCurveTo(-u*0.5,u*0.4,-u*0.6,-u*0.3,0,-u);ctx.closePath();ctx.stroke();ctx.beginPath();ctx.arc(0,-u*0.2,u*0.18,0,7);ctx.stroke();break;
+    case 'star':ctx.beginPath();for(let i=0;i<10;i++){const a=-Math.PI/2+i*Math.PI/5,rr=i%2?u*0.4:u;i?ctx.lineTo(Math.cos(a)*rr,Math.sin(a)*rr):ctx.moveTo(Math.cos(a)*rr,Math.sin(a)*rr);}ctx.closePath();ctx.stroke();break;
+    case 'chat':rrect(-u*0.9,-u*0.8,u*1.8,u*1.3,u*0.35);ctx.stroke();ctx.beginPath();ctx.moveTo(-u*0.3,u*0.5);ctx.lineTo(-u*0.5,u*0.95);ctx.lineTo(0,u*0.5);ctx.stroke();break;
+    case 'play':ctx.beginPath();ctx.arc(0,0,u*0.9,0,7);ctx.stroke();ctx.beginPath();ctx.moveTo(-u*0.3,-u*0.45);ctx.lineTo(u*0.5,0);ctx.lineTo(-u*0.3,u*0.45);ctx.closePath();ctx.fill();break;
+    default:text(name.slice(0,1).toUpperCase(),0,2,s*0.9,{face:DISPLAY,weight:800,color});
+  }
+  ctx.restore();
+}
+// ============ SCENES =======================================================
+// Each scene is fn(lt,d): lt = local time within the scene, d = its duration.
+// Wrap content alpha in env(lt,d) so scenes cross-fade at their boundaries.
+
+// DEMO scene 1 — headline pop with overshoot + accent underline sweep
+function sceneTitle(lt,d){
+  const a=env(lt,d);
+  drawParticles(lt,a*0.9);
+  const sc=lerp(0.7,1,outBack(clamp01(lt/0.85))), fy=Math.sin(lt*1.3)*8;
+  ctx.save(); ctx.translate(W/2,H*0.42+fy); ctx.scale(sc,sc);
+  fitText(B.name,0,0,168,W*0.86,{face:DISPLAY,weight:800,color:INK,alpha:a*clamp01(lt/0.4)});
+  ctx.restore();
+  const uw=lerp(0,360,outExpo(clamp01((lt-0.5)/0.7)));
+  ctx.save(); ctx.globalAlpha=a; ctx.strokeStyle=ACCENT; ctx.lineWidth=6; ctx.lineCap='round';
+  ctx.beginPath(); ctx.moveTo(W/2-uw/2,H*0.42+120+fy); ctx.lineTo(W/2+uw/2,H*0.42+120+fy); ctx.stroke(); ctx.restore();
+  fitText(B.tagline,W/2,H*0.42+220+fy,52,W*0.8,{weight:600,color:BRAND_LIGHT,alpha:a*clamp01((lt-1.0)/0.6)});
+}
+
+// DEMO scene 2 — icon badges, elastic pop, staggered
+function sceneBadges(lt,d){
+  const a=env(lt,d), items=(B.features||[]).slice(0,5);
+  fitText(B.tagline,W/2,H*0.16,110,W*0.9,{face:DISPLAY,color:INK,alpha:a*clamp01(lt/0.5)});
+  const R=118, pos=[[W*0.24,H*0.42],[W*0.5,H*0.42],[W*0.76,H*0.42],[W*0.37,H*0.66],[W*0.63,H*0.66]];
+  items.forEach(([ic,label],i)=>{
+    const p=clamp01((lt-(0.4+i*0.13))/0.9); if(p<=0) return;
+    const sc=lerp(0.2,1,outElastic(p)), [cx,cy]=pos[i], ca=a*clamp01(p*2), acc=i===3;
+    ctx.save(); ctx.globalAlpha=ca; ctx.translate(cx,cy); ctx.scale(sc,sc);
+    ctx.fillStyle=hex(BRAND,0.22); ctx.beginPath(); ctx.arc(0,0,R,0,7); ctx.fill();
+    ctx.strokeStyle=hex(acc?ACCENT:BRAND_LIGHT,0.9); ctx.lineWidth=5; ctx.beginPath(); ctx.arc(0,0,R,0,7); ctx.stroke();
+    icon(ic,0,-6,120,acc?ACCENT:BRAND_LIGHT); ctx.restore();
+    fitText(label,cx,cy+R+52,52,R*2.1,{face:DISPLAY,color:INK,alpha:ca});
+  });
+}
+
+// ============ TIMELINE — [startSec, endSec, sceneFn] ======================
+const SCENES=[
+  [0,        DUR*0.5, sceneTitle],
+  [DUR*0.5,  DUR,     sceneBadges],
+];
+function renderFrame(t){
+  t=Math.max(0,Math.min(DUR-0.001,t));
+  drawBg(t); drawGrid(t,0.8+0.6*clamp01((t-(DUR-4))/3));
+  for(const [a,b,fn] of SCENES) if(t>=a&&t<b) fn(t-a,b-a);
+  postfx();
+}
+window.renderFrame=renderFrame;
+
+// ============ READINESS GATE (render.mjs awaits this) =====================
+window.__ready=(async()=>{
+  try{ await document.fonts.load(`800 100px "${DISPLAY}"`); await document.fonts.load(`600 100px "${BODY}"`);
+       await document.fonts.load(`400 100px "${BODY}"`); await document.fonts.ready; }catch(e){}
+  for(let i=0;i<100&&!logoReady;i++) await new Promise(r=>setTimeout(r,30));
+  renderFrame(0); return true;
+})();
+</script>
+</body>
+</html>
