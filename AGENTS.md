@@ -27,15 +27,23 @@ a video.
    and `public/`,`src/assets/` for a `logo.png`. Copy `assets/brand.example.js`
    to `brand.js` and fill what you found; omit the rest (neutral fallbacks exist).
 3. **Set up the working dir:** copy `assets/template.html` → `showreel.html`, plus
-   `render.mjs`, `preview.mjs`, and your `brand.js`.
+   `render.mjs`, `preview.mjs`, `build.mjs`, and your `brand.js`.
 4. **Spec:** default vertical `1080x1920` @ 60fps, 15s. Ask if unstated (format,
-   length, message). Match `W,H,DUR` at the top of the HTML AND the `<canvas>`.
-5. **Write scenes:** edit the `SCENES` timeline `[startSec, endSec, fn]` and the
-   `fn(lt,d)` functions. Wrap content alpha in `env(lt,d)` for auto cross-fades.
-6. **Preview (cheap):** `node preview.mjs --html showreel.html --at 2,7,11,14` —
-   read the PNGs, confirm `page errors: none`.
-7. **Render:** `node render.mjs --html showreel.html --out out.mp4 --dur 15 --fps 60 --w 1080 --h 1920`
-8. **Verify** the MP4 and clean up.
+   length, **sound**, message). Most social plays muted — design captions-first.
+5. **Write scenes:** add scene functions to `SCENE_FNS` (draw order); each
+   `fn(lt,d)` gets local time + duration. Wrap content alpha in `env(lt,d)`.
+   Adjacent scenes crossfade automatically over `XFADE`.
+6. **Build (single source of timing):** edit `SPEC` in `build.mjs` — dims/fps,
+   `audio` (`none`/`music`/`voice`), one entry per scene (`{hold}` or `{say:'…'}`).
+   `node build.mjs` measures voiceover → patches the `__TIMING__` block → renders →
+   muxes audio → verifies, so captions/voice and cuts never drift or overlap.
+7. **Preview (cheap):** `node preview.mjs --html showreel.html --at 2,7,11,14 --safe`
+   (title-safe + platform-UI guides) — read the PNGs, confirm `page errors: none`.
+   `node contact.mjs --html showreel.html` tiles a thumbnail grid for pacing.
+8. **Verify** the MP4 (dims/duration, audio stream if expected) and clean up.
+
+No harness? You can hand-edit `BEATS`/`DUR`/`XFADE`/`CAPTIONS` in the `__TIMING__`
+block and run `render.mjs` directly (`--cache` reuses frames when nothing changed).
 
 ## Full reference
 

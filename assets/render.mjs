@@ -4,15 +4,20 @@
 //
 // Usage:
 //   node render.mjs --html showreel.html --out video.mp4 --dur 15 --fps 60 --w 1080 --h 1920
+//   --cache   reuse .frames when the HTML + params are byte-identical (safe: any
+//             edit changes the signature and forces a full re-render). Lets you
+//             re-encode, or resume an interrupted identical run, without re-shooting.
 // Defaults: dur 15, fps 60, 1080x1920, out <html>.mp4
 import puppeteer from 'puppeteer-core';
 import { pathToFileURL } from 'node:url';
-import { existsSync, mkdirSync, rmSync, readdirSync } from 'node:fs';
+import { existsSync, mkdirSync, rmSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { spawnSync, execSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import path from 'node:path';
 
 const argv = process.argv.slice(2);
 const arg = (k, d) => { const i = argv.indexOf(`--${k}`); return i >= 0 ? argv[i + 1] : d; };
+const has = k => argv.includes(`--${k}`);
 
 const HTML = path.resolve(arg('html', 'showreel.html'));
 const DIR = path.dirname(HTML);
@@ -47,38 +52,48 @@ function findFfmpeg() {
   throw new Error('ffmpeg not found — install it (winget install Gyan.FFmpeg)');
 }
 const pad = n => String(n).padStart(5, '0');
+const CACHE = has('cache');
+const SIG = path.join(FRAMES, '.sig');
+const sig = createHash('sha256').update(readFileSync(HTML)).update(`${FPS}|${DUR}|${W}|${H}`).digest('hex');
+const framesValid = () => existsSync(SIG) && readFileSync(SIG, 'utf8') === sig
+  && Array.from({ length: TOTAL }, (_, f) => path.join(FRAMES, `f${pad(f)}.png`)).every(existsSync);
 
 async function main() {
   const ffmpeg = findFfmpeg();
-  rmSync(FRAMES, { recursive: true, force: true });
-  mkdirSync(FRAMES, { recursive: true });
 
-  const browser = await puppeteer.launch({
-    executablePath: findBrowser(), headless: 'new',
-    args: ['--no-sandbox', '--disable-gpu', `--window-size=${W},${H}`, '--force-device-scale-factor=1'],
-  });
-  const page = await browser.newPage();
-  const errs = [];
-  page.on('pageerror', e => errs.push(String(e)));
-  await page.setViewport({ width: W, height: H, deviceScaleFactor: 1 });
-  await page.goto(pathToFileURL(HTML).href, { waitUntil: 'networkidle0' });
-  await page.evaluate(() => window.__ready);
-  if (errs.length) console.warn('page errors:', errs);
+  if (CACHE && framesValid()) {
+    console.log(`cache hit — reusing ${TOTAL} frames, skipping render`);
+  } else {
+    rmSync(FRAMES, { recursive: true, force: true });
+    mkdirSync(FRAMES, { recursive: true });
+    const browser = await puppeteer.launch({
+      executablePath: findBrowser(), headless: 'new',
+      args: ['--no-sandbox', '--disable-gpu', `--window-size=${W},${H}`, '--force-device-scale-factor=1'],
+    });
+    const page = await browser.newPage();
+    const errs = [];
+    page.on('pageerror', e => errs.push(String(e)));
+    await page.setViewport({ width: W, height: H, deviceScaleFactor: 1 });
+    await page.goto(pathToFileURL(HTML).href, { waitUntil: 'networkidle0' });
+    await page.evaluate(() => window.__ready);
+    if (errs.length) console.warn('page errors:', errs);
 
-  const el = await page.$('#c');
-  console.log(`rendering ${TOTAL} frames @ ${FPS}fps (${W}x${H}) ...`);
-  for (let f = 0; f < TOTAL; f++) {
-    await page.evaluate(tt => window.renderFrame(tt), f / FPS);
-    await el.screenshot({ path: path.join(FRAMES, `f${pad(f)}.png`) });
-    if (f % 120 === 0) console.log(`  ${f}/${TOTAL}`);
+    const el = await page.$('#c');
+    console.log(`rendering ${TOTAL} frames @ ${FPS}fps (${W}x${H}) ...`);
+    for (let f = 0; f < TOTAL; f++) {
+      await page.evaluate(tt => window.renderFrame(tt), f / FPS);
+      await el.screenshot({ path: path.join(FRAMES, `f${pad(f)}.png`) });
+      if (f % 120 === 0) console.log(`  ${f}/${TOTAL}`);
+    }
+    await browser.close();
+    writeFileSync(SIG, sig);
   }
-  await browser.close();
 
   console.log('encoding mp4 ...');
   const r = spawnSync(ffmpeg, ['-y', '-framerate', String(FPS), '-i', path.join(FRAMES, 'f%05d.png'),
     '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-crf', '18', '-movflags', '+faststart', OUT], { stdio: 'inherit' });
   if (r.status !== 0) throw new Error('ffmpeg failed');
-  rmSync(FRAMES, { recursive: true, force: true });
+  if (!CACHE) rmSync(FRAMES, { recursive: true, force: true });   // --cache keeps frames for reuse
   console.log('done ->', OUT);
 }
 main().catch(e => { console.error(e); process.exit(1); });

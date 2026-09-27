@@ -17,6 +17,7 @@ them. Deterministic, re-renderable, versionable in git.
 - **ffmpeg** — `ffmpeg -version`. Missing on Windows: `winget install Gyan.FFmpeg` (winget leaves it unlinked under `…/WinGet/Packages/…`; `render.mjs` already scans that path).
 - **A Chromium** — Chrome or Edge. `render.mjs` auto-finds both; Edge ships with Windows.
 - **puppeteer-core** — install once in the working dir: `npm i puppeteer-core@23` (`package.json` should have `"type":"module"`).
+- **edge-tts** (only if the user wants voiceover) — `python -m pip install edge-tts`. Free Microsoft neural voices; `--list-voices` for the language you need. `build.mjs` calls it.
 
 ## The core idea
 
@@ -48,22 +49,42 @@ edits to the engine. Only `brand.js` (and the optional `logo.png`) is per-projec
 ## Workflow
 
 1. **Copy the assets** into the working dir (e.g. a `motion/` folder):
-   `template.html` → your `showreel.html`, plus `render.mjs`, `preview.mjs`, and
-   your project's `brand.js` (see first-run above).
-2. **Decide the spec** — aspect/dims, duration, fps, the message beats. Ask the
-   user if unstated (format, sound, length, what to say). Vertical `1080x1920`
-   @ 60fps, 15s is the default. Update `W,H,DUR` at the top of the HTML **and**
-   the `<canvas width/height>` to match.
-3. **Write the scenes.** Edit the `SCENES` timeline `[startSec, endSec, fn]` and
-   the scene functions. Each `fn(lt, d)` gets local time + duration; wrap content
-   in `env(lt,d)` for automatic cross-fades at boundaries.
-4. **Preview cheaply** before the full render — it's slow:
-   `node preview.mjs --html showreel.html --at 2,7,11,14`
-   Read the PNGs, check text/overlap/timing, confirm `page errors: none`.
-5. **Render:**
-   `node render.mjs --html showreel.html --out out.mp4 --dur 15 --fps 60 --w 1080 --h 1920`
-6. **Verify** the MP4 (dims/duration) and clean up. Done only when it plays and
-   looks right.
+   `template.html` → your `showreel.html`, plus `render.mjs`, `preview.mjs`,
+   `build.mjs`, and your project's `brand.js` (see first-run above). Optional:
+   `contact.mjs`, `fetch-fonts.mjs`.
+2. **Decide the spec** — aspect/dims, duration, fps, sound, the message beats.
+   Ask the user if unstated (format, **sound**, length, what to say). Vertical
+   `1080x1920` @ 60fps is the default. Sound: silent (default), music bed, or
+   voiceover — most social plays **muted**, so design captions-first.
+3. **Write the scenes.** Add scene functions and list them in `SCENE_FNS` (draw
+   order). Each `fn(lt,d)` gets local time + duration; wrap content alpha in
+   `env(lt,d)`. You do NOT hand-time scenes — timing is the harness's job (step 4).
+   Adjacent scenes **crossfade** automatically over `XFADE`; no manual flashes needed.
+4. **Set the SPEC + build.** Edit `SPEC` in `build.mjs`: dims/fps, `xfade`, `audio`
+   (`none`/`music`/`voice`), and one entry per scene — `{ hold: seconds }` or
+   `{ say: 'line' }` (duration measured from the voiceover, so text and audio can't
+   drift or overlap). `node build.mjs` then measures → patches the `__TIMING__` block
+   in the HTML → renders → muxes audio (if any) → verifies. Single source of timing:
+   change a line, one command re-syncs everything.
+   - `--skip-tts` reuse `vo*.mp3`; `--skip-render` reuse the mp4 (audio-only re-mix).
+5. **Preview cheaply** before trusting the full render:
+   `node preview.mjs --html showreel.html --at 2,7,11,14 --safe`
+   `--safe` overlays title-safe + platform-UI zones (bottom caption band, right
+   action rail) — keep key text inside the dashed box. Confirm `page errors: none`.
+   For pacing across the whole clip in one image:
+   `node contact.mjs --html showreel.html --dur 15 --grid 4x3` tiles evenly-spaced
+   frames into `contact.png` — spot dead air / scene coverage without a full render.
+6. **Verify** the MP4 (dims/duration, audio stream if expected) and clean up. Done
+   only when it plays and looks right.
+
+**Duration reality:** a voiced script's length is set by the narration read at a
+hearable pace — you cannot wish it shorter. `build.mjs` reports the computed `DUR`;
+if it overshoots the target, trim words (fewer list items, shorter lines) rather
+than speeding the voice past readability.
+
+**Hand-timing (no harness):** you can still edit `BEATS`/`DUR`/`XFADE`/`CAPTIONS`
+in the `__TIMING__` block directly and just run `render.mjs` — the harness only
+owns that block, it isn't required.
 
 ## What the template gives you
 
@@ -82,12 +103,18 @@ Helpers already in `template.html` — reuse, don't re-derive:
 - **Brand constants:** `INK BRAND BRAND_LIGHT BRAND_DARK ACCENT`, `DISPLAY BODY DIR`
   — all sourced from `window.BRAND`. Change the video's whole look by editing
   `brand.js`, not the engine.
+- **Transitions:** `renderFrame` crossfades adjacent scenes over `XFADE` via an
+  offscreen layer, so a scene's own alpha logic can't break the blend. Hard cut?
+  Set `XFADE=0`.
+- **Captions:** `CAPTIONS=[{t,end,text}]` draws a high-contrast pill low in the
+  frame (title-safe) for muted playback. `build.mjs` auto-fills it from `say` lines.
 
 ## Any video: map the request to scenes
 
 The user describes what they want ("a 10s ad for X", "a fun countdown", "a quote
-reel"). Break it into a `SCENES` timeline of 2–5 beats and write each `fn(lt,d)`.
-Common building blocks — most reuse template helpers, a couple are a few lines:
+reel"). Break it into 2–5 scene functions (add them to `SCENE_FNS`) and let the
+`build.mjs` SPEC set each one's length. Common building blocks — most reuse template
+helpers, a couple are a few lines:
 
 - **Title / hook** — `sceneTitle` in the template (pop + underline sweep).
 - **Kinetic list / feature chips** — `sceneBadges` pattern: loop items, stagger a
@@ -119,16 +146,26 @@ accent color an accent; let the brand color carry the frame.
   never raw `text` for variable-length strings in a fixed box.
 - **Fonts:** loaded from Google Fonts (URL in `brand.js`) inside `__ready`; the
   browser needs network at render time. The template awaits `document.fonts.ready`
-  before frame 0.
-- **Grain uses `Math.random()`** — fine, each frame renders once. Don't rely on
-  determinism if you add a rewind/scrub feature; make it a function of `t` then.
-- **Duration change:** the demo timeline is written as fractions of `DUR` so it
-  scales; hard-coded scene times don't — update both if you pin seconds.
+  before frame 0. Run `node fetch-fonts.mjs` once to vendor them into `fonts/` and
+  point `brand.js` `fontsUrl` at `fonts/fonts.css` — no network, reproducible.
+- **Grain is deterministic** — `postfx(t)` seeds a mulberry32 `rng` off `t`, so
+  every frame is a pure function of time (enables scrubbing and the render cache).
+  Keep any new randomness a function of `t`, never `Math.random()`.
+- **Duration change:** the harness owns `DUR`/`BEATS`, so re-running `build.mjs`
+  after editing a scene's `hold`/`say` re-times everything. Only hand-edited
+  `__TIMING__` blocks need manual updates.
 
 ## Extending
 
-- **Audio** (skipped by default): synth a beat in an `audio.mjs` (WebAudio
-  offline render → WAV) and add `-i audio.wav -c:a aac -shortest` to the ffmpeg
-  args in `render.mjs`. 120 BPM = 0.5s/beat; align scene cuts to beats.
+- **Audio** is a first-class, optional path in `build.mjs` (`audio: 'music'|'voice'`):
+  a soft synth pad + whooshes on every cut + `edge-tts` voiceover, mixed and
+  `loudnorm`'d (EBU R128, `I=-16`) so it isn't too quiet/loud on social. Voiceover
+  timing is derived from the measured clips, so it can't drift from the captions.
+  For a real music bed, swap the `aevalsrc` pad for `-i track.mp3`.
+- **Faster iteration** (built in): `render.mjs --cache` content-hashes the HTML +
+  `fps|dur|w|h` into `.frames/.sig` and reuses frames on a hit (any edit changes
+  the hash and forces a full re-render, so it's safe — re-encode or resume without
+  re-shooting); `contact.mjs` tiles a thumbnail grid for pacing checks;
+  `fetch-fonts.mjs` vendors the fonts locally.
 - **Other formats:** `--w 1080 --h 1080` (square) or `--w 1920 --h 1080`
-  (landscape); update the HTML `W,H` and canvas attrs to match.
+  (landscape); set `SPEC.w/h` in `build.mjs` and match the HTML `W,H` + canvas attrs.

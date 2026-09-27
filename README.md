@@ -46,17 +46,20 @@ renders on-brand. No agent at all? See **Manual use** below.
 
 ```bash
 cp assets/template.html   motion/showreel.html
-cp assets/render.mjs assets/preview.mjs motion/
+cp assets/render.mjs assets/preview.mjs assets/build.mjs motion/
 cp assets/brand.example.js motion/brand.js   # edit colors/fonts/name
 cd motion && npm i puppeteer-core@23
 
-node preview.mjs --html showreel.html --at 2,7,11,14
-node render.mjs  --html showreel.html --out out.mp4 --dur 15 --fps 60 --w 1080 --h 1920
+node preview.mjs --html showreel.html --at 2,7,11,14 --safe
+node build.mjs                               # patch timing → render → (mux audio) → verify
+# or render directly, bypassing the harness:
+node render.mjs --html showreel.html --out out.mp4 --dur 15 --fps 60 --w 1080 --h 1920
 ```
 
-Edit `brand.js` for the look; edit the `SCENES` timeline in `showreel.html` for
-the content. Formats: `1080x1920` vertical (default), `1080x1080` square,
-`1920x1080` landscape — update `W,H,DUR` and the `<canvas>` attributes to match.
+Edit `brand.js` for the look; edit `SPEC` in `build.mjs` (or the `__TIMING__`
+block + `SCENE_FNS` in `showreel.html`) for the content and timing. Formats:
+`1080x1920` vertical (default), `1080x1080` square, `1920x1080` landscape —
+update `SPEC.w/h`, the HTML `W,H`, and the `<canvas>` attributes to match.
 
 ## Layout
 
@@ -67,8 +70,11 @@ motion-graphics-skill/
   assets/
     template.html       # the engine — copy to showreel.html
     brand.example.js    # per-project theme — copy to brand.js
-    render.mjs           # frames → mp4
-    preview.mjs          # sample-frame PNGs for a quick check
+    render.mjs          # frames → mp4 (--cache reuses unchanged frames)
+    preview.mjs         # sample-frame PNGs (--safe overlays title-safe guides)
+    build.mjs           # timeline harness — one SPEC drives video + audio in sync
+    contact.mjs         # tile a thumbnail grid into one PNG for pacing checks
+    fetch-fonts.mjs     # vendor the brand fonts locally (offline/reproducible)
 ```
 
 ## License

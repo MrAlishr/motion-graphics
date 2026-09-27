@@ -13,9 +13,12 @@
 <canvas id="c" width="1080" height="1920"></canvas>
 <script>
 // ============ CONFIG — match --w/--h/--dur passed to render.mjs ============
-const W=1080, H=1920, DUR=15;
-const canvas=document.getElementById('c'), ctx=canvas.getContext('2d');
+const W=1080, H=1920;
+const canvas=document.getElementById('c'); let ctx=canvas.getContext('2d');
 canvas.width=W; canvas.height=H;
+// offscreen layer for scene crossfades (see drawScene / renderFrame)
+const _layer=document.createElement('canvas'); _layer.width=W; _layer.height=H;
+const _lctx=_layer.getContext('2d');
 
 // ============ BRAND (window.BRAND wins; DEFAULTS are a neutral fallback) ====
 const DEFAULTS={
@@ -102,13 +105,16 @@ function drawParticles(t,alpha){
   }
   ctx.restore();
 }
-// post fx: vignette + film grain
-function postfx(){
+// seeded PRNG (mulberry32) — grain is a function of t, so every frame is
+// reproducible: enables scrubbing and the render cache. Not Math.random().
+function rng(seed){let a=seed>>>0;return()=>{a|=0;a=a+0x6D2B79F5|0;let t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296;};}
+// post fx: vignette + deterministic film grain
+function postfx(t){
   const vg=ctx.createRadialGradient(W/2,H*0.45,H*0.25,W/2,H*0.5,H*0.72);
   vg.addColorStop(0,'rgba(0,0,0,0)'); vg.addColorStop(1,'rgba(0,0,0,0.55)');
   ctx.fillStyle=vg; ctx.fillRect(0,0,W,H);
-  ctx.save(); ctx.globalAlpha=0.035;
-  for(let i=0;i<1400;i++){ctx.fillStyle=Math.random()<0.5?'#000':'#fff';ctx.fillRect(Math.random()*W,Math.random()*H,2,2);}
+  ctx.save(); ctx.globalAlpha=0.035; const r=rng(Math.floor(t*1000)+1);
+  for(let i=0;i<1400;i++){ctx.fillStyle=r()<0.5?'#000':'#fff';ctx.fillRect(r()*W,r()*H,2,2);}
   ctx.restore();
 }
 // minimal path icons centered at (x,y), fitting size s
@@ -164,16 +170,49 @@ function sceneBadges(lt,d){
   });
 }
 
-// ============ TIMELINE — [startSec, endSec, sceneFn] ======================
-const SCENES=[
-  [0,        DUR*0.5, sceneTitle],
-  [DUR*0.5,  DUR,     sceneBadges],
-];
+// ============ TIMELINE ====================================================
+// Scene DRAWING order lives here; scene TIMING (BEATS/DUR) lives in the block
+// below, which build.mjs owns — so voiceover/captions and cuts stay in sync
+// and never overlap. Hand-timing? Just edit BEATS yourself.
+const SCENE_FNS=[sceneTitle, sceneBadges];
+
+/* __TIMING_START__ (build.mjs patches this; hand-edit only without the harness) */
+let DUR=15;
+let BEATS=[0, 7.5];        // scene i runs BEATS[i] .. BEATS[i+1] (last -> DUR)
+let XFADE=0.45;            // crossfade window between scenes (seconds)
+let CAPTIONS=[];           // muted-first: [{t, end, text}] — drawn bottom, title-safe
+/* __TIMING_END__ */
+
+// render one scene through the offscreen layer, composited at `alpha`
+function drawScene(i,lt,d,alpha){
+  if(i<0||i>=SCENE_FNS.length||alpha<=0) return;
+  _lctx.clearRect(0,0,W,H); _lctx.globalAlpha=1;
+  const main=ctx; ctx=_lctx; SCENE_FNS[i](lt,d); ctx=main;
+  ctx.save(); ctx.globalAlpha=clamp01(alpha); ctx.drawImage(_layer,0,0); ctx.restore();
+}
+// muted-first captions: high-contrast pill low in the frame, above platform UI
+function drawCaptions(t){
+  for(const c of CAPTIONS){
+    if(t<c.t||t>=c.end) continue;
+    const a=Math.min(clamp01((t-c.t)/0.2),clamp01((c.end-t)/0.2));
+    ctx.save(); ctx.globalAlpha=a; ctx.font=`600 46px "${BODY}", sans-serif`;
+    const w=Math.min(ctx.measureText(c.text).width+64, W*0.9), y=H*0.82;
+    ctx.fillStyle='rgba(0,0,0,0.55)'; rrect(W/2-w/2,y-40,w,80,40); ctx.fill();
+    ctx.restore();
+    fitText(c.text,W/2,y,46,W*0.86,{weight:600,color:'#FFFFFF',alpha:a});
+  }
+}
 function renderFrame(t){
   t=Math.max(0,Math.min(DUR-0.001,t));
   drawBg(t); drawGrid(t,0.8+0.6*clamp01((t-(DUR-4))/3));
-  for(const [a,b,fn] of SCENES) if(t>=a&&t<b) fn(t-a,b-a);
-  postfx();
+  // locate current scene from BEATS
+  let i=0; for(let k=0;k<BEATS.length;k++) if(t>=BEATS[k]) i=k;
+  const s=BEATS[i], e=(i+1<BEATS.length?BEATS[i+1]:DUR), d=e-s;
+  const p=XFADE>0?clamp01((t-s)/XFADE):1;      // incoming fade-in
+  if(i>0 && p<1){ const ps=BEATS[i-1]; drawScene(i-1, t-ps, s-ps, 1-p); }  // outgoing tail
+  drawScene(i, t-s, d, i>0?p:1);
+  drawCaptions(t);
+  postfx(t);
 }
 window.renderFrame=renderFrame;
 
