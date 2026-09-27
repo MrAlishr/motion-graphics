@@ -7,26 +7,34 @@ description**, entirely in code. One HTML file draws each frame with a
 ffmpeg stitches them into an MP4. No After Effects, no timeline app, no video
 libraries. Deterministic and versionable in git.
 
-It's a [Claude Code](https://claude.com/claude-code) **skill**: brand-neutral,
-and it auto-matches its palette, fonts, name and text direction to whatever
-project you drop it into on the first run.
+Agent-agnostic and brand-neutral: it auto-matches its palette, fonts, name and
+text direction to whatever project you drop it into on the first run. Works with
+**Claude Code**, **Codex**, **OpenCode**, and any other AGENTS.md-aware agent —
+the engine is the same, only the entry file differs.
 
 ## Install
 
-Copy the skill into any project (or your user scope):
+**Claude Code** — copy as a skill (`SKILL.md` is the entry point):
 
 ```bash
 # per-project
-mkdir -p .claude/skills
-cp -r motion-graphics-skill .claude/skills/motion-graphics
-
-# or user-wide (all projects)
+mkdir -p .claude/skills && cp -r motion-graphics-skill .claude/skills/motion-graphics
+# or user-wide
 cp -r motion-graphics-skill ~/.claude/skills/motion-graphics
 ```
 
-Then just ask Claude Code, e.g. *"make a 15s vertical promo reel for this
-project"*. On the first run it reads your project's colors/fonts/name into a
-`brand.js` and renders on-brand.
+**Codex / OpenCode / Cursor / Gemini CLI** — these read [`AGENTS.md`](https://agents.md):
+
+```bash
+# drop it in your project (keep the folder so AGENTS.md can reference SKILL.md)
+cp -r motion-graphics-skill tools/motion-graphics
+# then add one line to your project's root AGENTS.md:
+#   For video/motion-graphics requests, follow ./tools/motion-graphics/AGENTS.md
+```
+
+Then just ask, e.g. *"make a 15s vertical promo reel for this project"*. On the
+first run the agent reads your project's colors/fonts/name into a `brand.js` and
+renders on-brand. No agent at all? See **Manual use** below.
 
 ## Requirements
 
@@ -54,7 +62,8 @@ the content. Formats: `1080x1920` vertical (default), `1080x1080` square,
 
 ```
 motion-graphics-skill/
-  SKILL.md              # the skill instructions Claude follows
+  SKILL.md              # entry point for Claude Code (frontmatter + full method)
+  AGENTS.md             # entry point for Codex / OpenCode / others
   assets/
     template.html       # the engine — copy to showreel.html
     brand.example.js    # per-project theme — copy to brand.js
